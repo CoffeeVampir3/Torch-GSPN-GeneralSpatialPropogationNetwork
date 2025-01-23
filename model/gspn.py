@@ -64,6 +64,7 @@ class GSPNLayer(nn.Module):
         weights = self.build_tridiagonal(pre_weights, seq_len) # [b, 1, h, width, width]
 
         # Implements the "linear recurrent process" from Eq. (1)
+        # I'm not entirely clear if I did this correctly but gave my best interpretation.
         propagation = []
         for i in range(seq_len):
             curr_w = weights[:, :, :, i, :] # Shape: [b, 1, h, w]
