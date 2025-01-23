@@ -21,24 +21,24 @@ class GSPNLayer(nn.Module):
         self.is_global = is_global
         self.group_size = group_size
 
-    def build_tridiagonal(self, pre_weights, width):
+    def build_tridiagonal(self, pre_weights, prop_seq_len):
         b, _, h, _ = pre_weights.shape  # [b, 3, h, w]
         
-        matrix = torch.zeros(b, h, width, width, device=pre_weights.device)  # [b, h, width, width]
+        matrix = torch.zeros(b, h, prop_seq_len, prop_seq_len, device=pre_weights.device)  # [b, h, prop_seq_len, prop_seq_len]
         
+        # Eq. 6 row stochastic normalization
         weights = torch.sigmoid(pre_weights)  # [b, 3, h, w]
-        
         # Normalize weights row-wise so each row sums to 1
         weights = weights / weights.sum(dim=1, keepdim=True).clamp(min=1e-6)  # [b, 3, h, w]
         
         # Fill the tridiagonal matrix with normalized weights
-        for i in range(width):
+        for i in range(prop_seq_len):
             for offset, k in zip([-1, 0, 1], range(3)):  # 3-way connection: left, middle, right
                 j = i + offset  # Tri-Neighbor index
-                if 0 <= j < width:
+                if 0 <= j < prop_seq_len:
                     matrix[:, :, i, j] = weights[:, k, :, i]
         
-        return matrix.unsqueeze(1)  # [b, 1, h, width, width]
+        return matrix.unsqueeze(1)  # [b, 1, h, prop_seq_len, prop_seq_len]
 
     def propagate_direction(self, x, direction):
         b, c, h, w = x.shape
@@ -60,7 +60,7 @@ class GSPNLayer(nn.Module):
             pre_weights = pre_weights.transpose(-1, -2)
             u = u.transpose(-1, -2)
 
-        # Build tridiagonal weight matrix using Equation 6
+        # Build tridiagonal weight matrix
         weights = self.build_tridiagonal(pre_weights, seq_len) # [b, 1, h, width, width]
 
         # Implements the "linear recurrent process" from Eq. (1)
@@ -87,7 +87,7 @@ class GSPNLayer(nn.Module):
         outputs = [self.propagate_direction(x, d) for d in ['tb', 'bt', 'lr', 'rl']]
         concat = torch.cat(outputs, dim=1)
         
-        # Learnable merging weights as discussed in Section 4.2
+        # Learned merging weights | Section 4.2
         weights = self.merge_weights(concat)
         weights = F.softmax(weights, dim=1).unsqueeze(1)
         
