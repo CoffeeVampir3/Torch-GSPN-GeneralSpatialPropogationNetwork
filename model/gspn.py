@@ -16,7 +16,7 @@ class GSPNLayer(nn.Module):
         self.to_weights = nn.Conv2d(dim // 4, 3, 1)    # Generates tri-diagonal weights w in Eq 1
         
         # Merging layers for 4-directional integration | Section 3.3
-        self.merge_weights = nn.Conv2d(dim * 4, 4, 1)
+        self.learned_merge_weights = nn.Conv2d(dim * 4, 4, 1)
         self.merge = nn.Conv2d(dim * 4, dim, 1)
         self.is_global = is_global
         self.group_size = group_size
@@ -78,7 +78,6 @@ class GSPNLayer(nn.Module):
 
         weights = self.build_tridiagonal(pre_weights, prop_seq_len, propagation_dim)
 
-        # Perform propagation using the linear recurrent process from Eq. 1
         hidden = torch.zeros(b, c, *x.shape[3:], device=x.device)
         propagation = []
         for i in range(prop_seq_len):
@@ -109,8 +108,8 @@ class GSPNLayer(nn.Module):
         outputs = [self.propagate_direction(x, d) for d in ['tb', 'bt', 'lr', 'rl']]
         concat = torch.cat(outputs, dim=1)
         
-        # Learned merging | Section 4.2
-        weights = self.merge_weights(concat)
+        # Section 4.2
+        weights = self.learned_merge_weights(concat)
         weights = F.softmax(weights, dim=1).unsqueeze(1)
         
         # Merge outputs from all directions
