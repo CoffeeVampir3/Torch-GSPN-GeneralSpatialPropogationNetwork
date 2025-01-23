@@ -9,7 +9,7 @@ from distributed_shampoo import AdamGraftingConfig, DistributedShampoo
 import numpy as np
 from utils.trainutils import count_parameters_layerwise
 
-def get_dataloaders(batch_size=256):
+def get_dataloaders(batch_size=4096):
     dataset = load_dataset("cifar10")
     
     transform = transforms.Compose([
@@ -55,7 +55,7 @@ def train(model, train_loader, val_loader, epochs=100):
     scheduler = CosineAnnealingLR(
         optimizer,
         T_max=total_steps,
-        eta_min=1e-5
+        eta_min=5e-6
     )
     
     print(count_parameters_layerwise(model))
