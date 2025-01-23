@@ -104,6 +104,7 @@ class GSPNLayer(nn.Module):
         return output
 
     def forward(self, x):
+        # input B C H W
         # 4-Directional propagation | Section 3.3
         outputs = [self.propagate_direction(x, d) for d in ['tb', 'bt', 'lr', 'rl']]
         concat = torch.cat(outputs, dim=1)
@@ -115,6 +116,6 @@ class GSPNLayer(nn.Module):
         # Merge outputs from all directions
         stacked = torch.stack(outputs, dim=2)
         merged = (stacked * weights).sum(dim=2)
-        
-        # Final merge and output
+
+        # output B C H W
         return self.merge(concat)
