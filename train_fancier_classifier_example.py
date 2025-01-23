@@ -29,7 +29,7 @@ def get_dataloaders(batch_size=256):
     
     return train_loader, val_loader
 
-def train(model, train_loader, val_loader, epochs=5):
+def train(model, train_loader, val_loader, epochs=100):
     torch.set_float32_matmul_precision('high')
     
     device = torch.device('cuda')
@@ -55,17 +55,17 @@ def train(model, train_loader, val_loader, epochs=5):
     scheduler = CosineAnnealingLR(
         optimizer,
         T_max=total_steps,
-        eta_min=5e-6 
+        eta_min=1e-5
     )
     
     print(count_parameters_layerwise(model))
     
-    # model = torch.compile(
-    #     model,
-    #     backend='inductor',
-    #     dynamic=False,
-    #     fullgraph=True,
-    # )
+    model = torch.compile(
+        model,
+        backend='inductor',
+        dynamic=False,
+        fullgraph=True,
+    )
     
     # Very scuffed counting but it's an example network who cares
     for epoch in range(epochs):

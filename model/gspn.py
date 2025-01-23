@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from .grn import GRN
 
 # My shot at implementing "Parallel Sequence Modeling via Generalized Spatial Propagation Network" https://arxiv.org/pdf/2501.12381
@@ -9,7 +8,7 @@ from .grn import GRN
 # Some random notes, adding GRN's into this layer structure did not seem as successful as adding it to the upper blocks in example network. In fact, it performed worse to add them here.
 
 class GSPNLayer(nn.Module):
-    def __init__(self, dim, is_global=True, group_size=2):
+    def __init__(self, dim, is_global=True):
         super().__init__()
         # Dimension reduction and projection layers following Section 4.2
         self.dim_reduce = nn.Conv2d(dim, dim // 4, 1)  # Reduces channel dimension for efficiency
@@ -22,7 +21,6 @@ class GSPNLayer(nn.Module):
         self.learned_merge_weights = nn.Conv2d(dim * 4, 4, 1)
         self.merge = nn.Conv2d(dim * 4, dim, 1)
         self.is_global = is_global
-        self.group_size = group_size
         
     def build_tridiagonal(self, pre_weights, prop_seq_len, propagation_dim):
         b, _, h, w = pre_weights.shape

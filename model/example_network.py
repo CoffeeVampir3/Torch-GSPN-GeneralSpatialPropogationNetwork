@@ -4,9 +4,9 @@ from .gspn import GSPNLayer
 from .grn import GRN
 
 class GSPNBlock(nn.Module):
-    def __init__(self, dim, is_global=True, group_size=2):
+    def __init__(self, dim, is_global=True):
         super(GSPNBlock, self).__init__()
-        self.gspn = GSPNLayer(dim, is_global=is_global, group_size=group_size)
+        self.gspn = GSPNLayer(dim, is_global=is_global)
 
         self.grn = GRN(dim * 4)
         self.mlp = nn.Sequential(
@@ -26,15 +26,14 @@ class GSPNBlock(nn.Module):
         return x
 
 class GSPNNetwork(nn.Module):
-    def __init__(self, in_channels=3, dims=[96, 192, 384, 768], depths=[2, 2, 7, 2], group_size=2):
+    def __init__(self, in_channels=3, dims=[96, 192, 384, 768], depths=[2, 2, 7, 2]):
         super(GSPNNetwork, self).__init__()
         # project input into feature space
         self.stem = nn.Conv2d(in_channels, dims[0], kernel_size=4, stride=4)
-
         self.levels = nn.ModuleList()
         for i in range(len(dims)):
             level = nn.Sequential(
-                *[GSPNBlock(dims[i], is_global=(i >= 2), group_size=group_size) for _ in range(depths[i])]
+                *[GSPNBlock(dims[i], is_global=(i <= 2)) for _ in range(depths[i])]
             )
             self.levels.append(level)
 
