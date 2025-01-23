@@ -1,16 +1,19 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
+
+from .grn import GRN
 
 # My shot at implementing "Parallel Sequence Modeling via Generalized Spatial Propagation Network" https://arxiv.org/pdf/2501.12381
-# There's some omitted things, for example I just used basic conv's there's no GRNs as indicated in the paper
+
+# Some random notes, adding GRN's into this layer structure did not seem as successful as adding it to the upper blocks in example network. In fact, it performed worse to add them here.
 
 class GSPNLayer(nn.Module):
     def __init__(self, dim, is_global=True, group_size=2):
         super().__init__()
         # Dimension reduction and projection layers following Section 4.2
         self.dim_reduce = nn.Conv2d(dim, dim // 4, 1)  # Reduces channel dimension for efficiency
+        
         self.to_u = nn.Conv2d(dim // 4, dim, 1)        # Projects to u in Eq 2
         self.to_lambda = nn.Conv2d(dim // 4, dim, 1)   # Projects to λ in Eq 1
         self.to_weights = nn.Conv2d(dim // 4, 3, 1)    # Generates tri-diagonal weights w in Eq 1
@@ -20,7 +23,7 @@ class GSPNLayer(nn.Module):
         self.merge = nn.Conv2d(dim * 4, dim, 1)
         self.is_global = is_global
         self.group_size = group_size
-
+        
     def build_tridiagonal(self, pre_weights, prop_seq_len, propagation_dim):
         b, _, h, w = pre_weights.shape
         
@@ -57,7 +60,7 @@ class GSPNLayer(nn.Module):
             propagation_dim = 3  # Propagate along width
 
         # Dimension reduction and projection as described in Section 4.2
-        reduced = self.dim_reduce(x)
+        reduced = self.dim_reduce(x)        
         u = self.to_u(reduced)  # Output weights u from Eq. 2
         lambda_weights = self.to_lambda(reduced)  # λ weights from Eq. 1
         pre_weights = self.to_weights(reduced)  # Pre-weights for tridiagonal matrix
@@ -116,6 +119,7 @@ class GSPNLayer(nn.Module):
         # Merge outputs from all directions
         stacked = torch.stack(outputs, dim=2)
         merged = (stacked * weights).sum(dim=2)
+        
+        output = self.merge(concat)
 
-        # output B C H W
-        return self.merge(concat)
+        return output

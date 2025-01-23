@@ -7,6 +7,7 @@ from model.example_network import GSPNNetwork
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from distributed_shampoo import AdamGraftingConfig, DistributedShampoo
 import numpy as np
+from utils.trainutils import count_parameters_layerwise
 
 def get_dataloaders(batch_size=256):
     dataset = load_dataset("cifar10")
@@ -57,12 +58,14 @@ def train(model, train_loader, val_loader, epochs=5):
         eta_min=5e-6 
     )
     
-    model = torch.compile(
-        model,
-        backend='inductor',
-        dynamic=False,
-        fullgraph=True,
-    )
+    print(count_parameters_layerwise(model))
+    
+    # model = torch.compile(
+    #     model,
+    #     backend='inductor',
+    #     dynamic=False,
+    #     fullgraph=True,
+    # )
     
     # Very scuffed counting but it's an example network who cares
     for epoch in range(epochs):

@@ -1,21 +1,25 @@
 import torch
 import torch.nn as nn
 from .gspn import GSPNLayer
+from .grn import GRN
 
 class GSPNBlock(nn.Module):
     def __init__(self, dim, is_global=True, group_size=2):
         super(GSPNBlock, self).__init__()
         self.gspn = GSPNLayer(dim, is_global=is_global, group_size=group_size)
+
+        self.grn = GRN(dim * 4)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
+            self.grn,
             nn.GELU(),
             nn.Linear(dim * 4, dim)
         )
 
     def forward(self, x):
-        # Input shape: B C H W
-        B, C, H, W = x.shape
+        # B C H W -> sparse propagation -> GRN
         x = x + self.gspn(x)
+        # Channel mixing with GRN in expanded space
         x = x.permute(0, 2, 3, 1)  # B H W C
         x = x + self.mlp(x)
         x = x.permute(0, 3, 1, 2)  # B C H W

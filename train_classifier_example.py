@@ -5,6 +5,7 @@ from datasets import load_dataset
 from torchvision import transforms
 from model.example_network import GSPNNetwork
 import numpy as np
+from utils.trainutils import count_parameters_layerwise
 
 def get_dataloaders(batch_size=256):
     dataset = load_dataset("cifar10")
@@ -37,6 +38,8 @@ def train(model, train_loader, val_loader, epochs=5):
         eps=1e-8,
         weight_decay=0.01
     )
+    
+    print(count_parameters_layerwise(model))
     
     # Very scuffed counting but it's an example network who cares
     for epoch in range(epochs):
