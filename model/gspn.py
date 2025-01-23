@@ -21,75 +21,96 @@ class GSPNLayer(nn.Module):
         self.is_global = is_global
         self.group_size = group_size
 
-    def build_tridiagonal(self, pre_weights, prop_seq_len):
-        b, _, h, _ = pre_weights.shape  # [b, 3, h, w]
+    def build_tridiagonal(self, pre_weights, prop_seq_len, propagation_dim):
+        b, _, h, w = pre_weights.shape
         
-        matrix = torch.zeros(b, h, prop_seq_len, prop_seq_len, device=pre_weights.device)  # [b, h, prop_seq_len, prop_seq_len]
+        # Initialize the tridiagonal matrix
+        matrix = torch.zeros(b, h, prop_seq_len, prop_seq_len, device=pre_weights.device)
         
-        # Eq. 6 row stochastic normalization
-        weights = torch.sigmoid(pre_weights)  # [b, 3, h, w]
-        # Normalize weights row-wise so each row sums to 1
-        weights = weights / weights.sum(dim=1, keepdim=True).clamp(min=1e-6)  # [b, 3, h, w]
+        # Normalize weights row-wise using sigmoid and row-wise normalization as in Eq. (6)
+        weights = torch.sigmoid(pre_weights)
+        weights = weights / weights.sum(dim=1, keepdim=True).clamp(min=1e-6)
         
-        # Fill the tridiagonal matrix with normalized weights
+        # Fill the tridiagonal matrix using a sliding window approach
         for i in range(prop_seq_len):
-            for offset, k in zip([-1, 0, 1], range(3)):  # 3-way connection: left, middle, right
-                j = i + offset  # Tri-Neighbor index
+            for offset, k in zip([-1, 0, 1], range(3)):
+                j = i + offset
                 if 0 <= j < prop_seq_len:
-                    matrix[:, :, i, j] = weights[:, k, :, i]
+                    if propagation_dim == 2:  # Propagate along height
+                        matrix[:, :, i, j] = weights[:, k, :, i]
+                    elif propagation_dim == 3:  # Propagate along width
+                        matrix[:, :, i, j] = weights[:, k, i, :]
         
-        return matrix.unsqueeze(1)  # [b, 1, h, prop_seq_len, prop_seq_len]
+        return matrix.unsqueeze(1)
 
     def propagate_direction(self, x, direction):
         b, c, h, w = x.shape
+        column_transposed = direction in ['lr', 'rl']
+        reverse = direction in ['bt', 'rl']
         
-        #print(F"X: {x.shape}")
-        reduced = self.dim_reduce(x)  # Downsample dimensions to operate on smaller target
+        # Determine propagation dimension and sequence length
+        if direction in ['tb', 'bt']:
+            prop_seq_len = h
+            propagation_dim = 2  # Propagate along height
+        else:
+            prop_seq_len = w
+            propagation_dim = 3  # Propagate along width
+
+        # Dimension reduction and projection as described in Section 4.2
+        reduced = self.dim_reduce(x)
         u = self.to_u(reduced)  # Output weights u from Eq. (2)
         lambda_weights = self.to_lambda(reduced)  # λ weights from Eq. (1)
-        pre_weights = self.to_weights(reduced)
+        pre_weights = self.to_weights(reduced)  # Pre-weights for tridiagonal matrix
 
-        if direction in ['tb', 'bt']:
-            hidden = torch.zeros(b, c, w, device=x.device)  # Hidden states for row-wise propagation
-            seq_len = h  # Propagate along height dimension
-        else:
-            hidden = torch.zeros(b, c, h, device=x.device)  # Hidden states for column-wise propagation
-            seq_len = w  # Propagate along width dimension
-            x = x.transpose(-1, -2)  # Transpose for column-wise propagation
+        # Transpose for column-wise directions
+        if column_transposed:
+            x = x.transpose(-1, -2)
             lambda_weights = lambda_weights.transpose(-1, -2)
             pre_weights = pre_weights.transpose(-1, -2)
             u = u.transpose(-1, -2)
 
-        # Build tridiagonal weight matrix
-        weights = self.build_tridiagonal(pre_weights, seq_len) # [b, 1, h, width, width]
+        # Reverse sequence for backward directions
+        if reverse:
+            x = torch.flip(x, dims=[propagation_dim])
+            lambda_weights = torch.flip(lambda_weights, dims=[propagation_dim])
+            pre_weights = torch.flip(pre_weights, dims=[propagation_dim])
+            u = torch.flip(u, dims=[propagation_dim])
 
-        # Implements the "linear recurrent process" from Eq. (1)
-        # I'm not entirely clear if I did this correctly but gave my best interpretation.
+        # Build tridiagonal weight matrix as described in Section 3.3
+        weights = self.build_tridiagonal(pre_weights, prop_seq_len, propagation_dim)
+
+        # Perform propagation using the linear recurrent process from Eq. (1)
+        hidden = torch.zeros(b, c, *x.shape[3:], device=x.device)
         propagation = []
-        for i in range(seq_len):
-            curr_w = weights[:, :, :, i, :] # Shape: [b, 1, h, w]
-            #print(F"cw: {curr_w.shape}")
-            curr_lambda = lambda_weights[:, :, i] # [b, c, seq_len]
-            #print(F"cl: {curr_lambda.shape}")
-            curr_x = x[:, :, i] # [b, c, seq_len]
-            #print(F"cx: {curr_x.shape}")
-
+        for i in range(prop_seq_len):
+            curr_w = weights[:, :, :, i, :]
+            curr_lambda = lambda_weights[:, :, :, i] if direction in ['lr', 'rl'] else lambda_weights[:, :, i]
+            curr_x = x[:, :, i] if direction in ['lr', 'rl'] else x[:, :, :, i]
+            
             # Apply propagation equation hi = wi·hi-1 + λi⊙xi from Eq. (1)
             hidden = (hidden.unsqueeze(-1) * curr_w).sum(dim=-1) + curr_lambda * curr_x
             propagation.append(hidden)
 
         # Stack propagated hidden states and apply output weights (Eq. 2)
-        output = torch.stack(propagation, dim=2)
-        return output * u  # Apply output weights u
+        output = torch.stack(propagation, dim=2 if direction in ['lr', 'rl'] else 3)
+        
+        # Reverse back for backward directions
+        if reverse:
+            output = torch.flip(output, dims=[propagation_dim])
+
+        # Apply output weights u and transpose back for column-wise directions
+        output = output * u
+        if direction in ['lr', 'rl']:
+            output = output.transpose(-1, -2)
+                
+        return output
 
     def forward(self, x):
-        # In B C H W
-        
-        # 4-D Scan Propagation from all directions
+        # 4-Directional propagation as described in Section 3.3
         outputs = [self.propagate_direction(x, d) for d in ['tb', 'bt', 'lr', 'rl']]
         concat = torch.cat(outputs, dim=1)
         
-        # Learned merging weights | Section 4.2
+        # Learned merging weights as described in Section 4.2
         weights = self.merge_weights(concat)
         weights = F.softmax(weights, dim=1).unsqueeze(1)
         
@@ -97,5 +118,5 @@ class GSPNLayer(nn.Module):
         stacked = torch.stack(outputs, dim=2)
         merged = (stacked * weights).sum(dim=2)
         
-        # Out B C H W
+        # Final merge and output
         return self.merge(concat)
