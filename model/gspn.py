@@ -83,6 +83,8 @@ class GSPNLayer(nn.Module):
         return output * u  # Apply output weights u
 
     def forward(self, x):
+        # In B C H W
+        
         # 4-D Scan Propagation from all directions
         outputs = [self.propagate_direction(x, d) for d in ['tb', 'bt', 'lr', 'rl']]
         concat = torch.cat(outputs, dim=1)
@@ -95,4 +97,5 @@ class GSPNLayer(nn.Module):
         stacked = torch.stack(outputs, dim=2)
         merged = (stacked * weights).sum(dim=2)
         
+        # Out B C H W
         return self.merge(concat)
